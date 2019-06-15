@@ -123,7 +123,7 @@ To make things easy, the reconstruction code we provide has no dependency on ROS
 We provide convenience functions to convert ROS bags (a popular format for event datasets) into event text files.
 In addition, we also provide scripts to convert a folder containing image reconstructions back to a rosbag (or to append image reconstructions to an existing rosbag).
 
-**Note**: it is necessary to have a sourced conda environment to run the following scripts. However, [ROS](https://www.ros.org/) needs to be installed and sourced.
+**Note**: it is **not** necessary to have a sourced conda environment to run the following scripts. However, [ROS](https://www.ros.org/) needs to be installed and sourced.
 
 ### rosbag -> events.txt
 
