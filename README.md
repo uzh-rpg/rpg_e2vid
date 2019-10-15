@@ -60,7 +60,7 @@ wget "http://rpg.ifi.uzh.ch/data/E2VID/models/E2VID_lightweight.pth.tar" -O pret
 - Download an example file with event data:
 
 ```bash
-wget "https://seafile.ifi.uzh.ch/f/ac6058453cc34ff5ab82/?dl=1" -O data/dynamic_6dof.zip
+wget "http://rpg.ifi.uzh.ch/data/E2VID/datasets/ECD_IJRR17/dynamic_6dof.zip" -O data/dynamic_6dof.zip
 ```
 
 Before running the reconstruction, make sure the conda environment is sourced:
@@ -87,7 +87,7 @@ Below is a description of the most important parameters:
 #### Main parameters
 
 - ``--window_size`` / ``-N`` (default: None) Number of events per tensor. This is the parameter that has the most influence of the image reconstruction quality. If set to None, this number will be automatically computed based on the sensor size, as N = width * height * num_events_per_pixel (see description of that parameter below).
--- ``--Imin`` (default: 0.0), `--Imax` (default: 1.0): the output image is normalized as follows: I = (I - Imin) / (Imax - Imin). If `--auto_hdr` is set to True, `--Imin` and `--Imax` will be automatically computed.
+- ``--Imin`` (default: 0.0), `--Imax` (default: 1.0): the output image is normalized as follows: `I = (I - Imin) / (Imax - Imin)`. If `--auto_hdr` is set to True, `--Imin` and `--Imax` will be automatically computed.
 - ``--auto_hdr`` (default: False) Automatically compute `--Imin` and `--Imax`. Disabled when `--color` is set.
 - ``--hot_pixels_file`` (default: None): Path to a file specifying the locations of hot pixels (such a file can be obtained with [this tool](https://github.com/cedric-scheerlinck/dvs_tools/tree/master/dvs_hot_pixel_filter) for example). These pixels will be ignored (i.e. zeroed out in the event tensors).
 - ``--color`` (default: False): if True, will perform color reconstruction as described in the paper. Only use this with a [color event camera](http://rpg.ifi.uzh.ch/CED.html) such as the Color DAVIS346.
