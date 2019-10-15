@@ -2,7 +2,7 @@ import torch
 import cv2
 import numpy as np
 from model.model import *
-from utils.inference_utils import CropParameters, EventPreprocessor, IntensityRescaler, ImageFilter, ImageDisplay, ImageWriter
+from utils.inference_utils import CropParameters, EventPreprocessor, IntensityRescaler, ImageFilter, ImageDisplay, ImageWriter, UnsharpMaskFilter
 from utils.inference_utils import upsample_color_image, merge_channels_into_color_image  # for color reconstruction
 from utils.util import robust_min, robust_max
 from utils.timers import CudaTimer, cuda_timers
@@ -27,28 +27,30 @@ class ImageReconstructor:
         print('== Image reconstruction == ')
         print('Image size: {}x{}'.format(self.height, self.width))
 
-        self.safety_margin = options.safety_margin
-        print('Safety margin: {}'.format(self.safety_margin))
-
         self.no_recurrent = options.no_recurrent
         if self.no_recurrent:
             print('!!Recurrent connection disabled!!')
 
         self.perform_color_reconstruction = options.color  # whether to perform color reconstruction (only use this with the DAVIS346color)
+        if self.perform_color_reconstruction:
+            if options.auto_hdr:
+                print('!!Warning: disabling auto HDR for color reconstruction!!')
+            options.auto_hdr = False  # disable auto_hdr for color reconstruction (otherwise, each channel will be normalized independently)
 
-        self.crop = CropParameters(self.width, self.height, self.model.num_encoders, self.safety_margin)
+        self.crop = CropParameters(self.width, self.height, self.model.num_encoders)
 
         self.last_states_for_each_channel = {'grayscale': None}
 
         if self.perform_color_reconstruction:
             self.crop_halfres = CropParameters(int(width / 2), int(height / 2),
-                                               self.model.num_encoders, self.safety_margin)
+                                               self.model.num_encoders)
             for channel in ['R', 'G', 'B', 'W']:
                 self.last_states_for_each_channel[channel] = None
 
         self.event_preprocessor = EventPreprocessor(options)
         self.intensity_rescaler = IntensityRescaler(options)
         self.image_filter = ImageFilter(options)
+        self.unsharp_mask_filter = UnsharpMaskFilter(options, device=self.device)
         self.image_writer = ImageWriter(options)
         self.image_display = ImageDisplay(options)
 
@@ -85,6 +87,13 @@ class ImageReconstructor:
 
                     # Output reconstructed image
                     crop = self.crop if channel == 'grayscale' else self.crop_halfres
+
+                    # Unsharp mask (on GPU)
+                    new_predicted_frame = self.unsharp_mask_filter(new_predicted_frame)
+
+                    # Intensity rescaler (on GPU)
+                    new_predicted_frame = self.intensity_rescaler(new_predicted_frame)
+
                     with CudaTimer('Tensor (GPU) -> NumPy (CPU)'):
                         reconstructions_for_each_channel[channel] = new_predicted_frame[0, 0, crop.iy0:crop.iy1,
                                                                                         crop.ix0:crop.ix1].cpu().numpy()
@@ -94,8 +103,7 @@ class ImageReconstructor:
                 else:
                     out = reconstructions_for_each_channel['grayscale']
 
-            out = self.intensity_rescaler(out)
-            out = (255.0 * out).astype(np.uint8)
+            # Post-processing, e.g bilateral filter (on CPU)
             out = self.image_filter(out)
 
             self.image_writer(out, event_tensor_id, stamp, events=events)

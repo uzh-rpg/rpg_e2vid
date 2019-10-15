@@ -17,7 +17,7 @@ class ConvLayer(nn.Module):
 
         self.norm = norm
         if norm == 'BN':
-            self.norm_layer = nn.BatchNorm2d(out_channels, momentum=0.01)
+            self.norm_layer = nn.BatchNorm2d(out_channels)
         elif norm == 'IN':
             self.norm_layer = nn.InstanceNorm2d(out_channels, track_running_stats=True)
 
@@ -183,6 +183,9 @@ class ConvLSTM(nn.Module):
         self.hidden_size = hidden_size
         pad = kernel_size // 2
 
+        # cache a tensor filled with zeros to avoid reallocating memory at each inference step if --no-recurrent is enabled
+        self.zero_tensors = {}
+
         self.Gates = nn.Conv2d(input_size + hidden_size, 4 * hidden_size, kernel_size, padding=pad)
 
     def forward(self, input_, prev_state=None):
@@ -193,11 +196,17 @@ class ConvLSTM(nn.Module):
 
         # generate empty prev_state, if None is provided
         if prev_state is None:
-            state_size = [batch_size, self.hidden_size] + list(spatial_size)
-            prev_state = (
-                torch.zeros(state_size).to(input_.device),
-                torch.zeros(state_size).to(input_.device)
-            )
+
+            # create the zero tensor if it has not been created already
+            state_size = tuple([batch_size, self.hidden_size] + list(spatial_size))
+            if state_size not in self.zero_tensors:
+                # allocate a tensor with size `spatial_size`, filled with zero (if it has not been allocated already)
+                self.zero_tensors[state_size] = (
+                    torch.zeros(state_size).to(input_.device),
+                    torch.zeros(state_size).to(input_.device)
+                )
+
+            prev_state = self.zero_tensors[tuple(state_size)]
 
         prev_hidden, prev_cell = prev_state
 

@@ -31,18 +31,15 @@ if __name__ == "__main__":
         makedirs(output_folder)
 
     # list all images in the folder
-    images = [f for f in glob.glob(join(args.input_folder, "*.png"))]
+    images = [f for f in glob.glob(join(args.input_folder, "*.png"), recursive=False)]
     images = sorted(images)
     print('Found {} images'.format(len(images)))
 
     # read timestamps (and check there is one timestamp per image...)
     stamps = np.loadtxt(join(args.input_folder, 'timestamps.txt'))
-    # print(len(stamps))
-    if len(stamps.shape) == 2:
-        stamps = stamps[:, 1]
     stamps = np.sort(stamps)
     np.savetxt(join(args.input_folder, 'timestamps_sorted.txt'), stamps)
-    # assert(len(stamps) == len(images)), print(len(stamps), len(images))
+    assert(len(stamps) == len(images))
 
     # find the closest image to each element in [t0, t0 + dt, t0 + 2 * dt, t0 + 3 * dt, ...]
     # where t0 = stamps[0]

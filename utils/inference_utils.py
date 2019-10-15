@@ -4,12 +4,15 @@ from .timers import Timer, CudaTimer
 from .loading_utils import get_device
 from os.path import join
 from math import ceil, floor
-from torch.nn import ZeroPad2d
+from torch.nn import ReflectionPad2d
 import numpy as np
 import torch
 import cv2
 from collections import deque
 import atexit
+import scipy.stats as st
+import torch.nn.functional as F
+from math import sqrt
 
 
 def make_event_preview(events, color=False):
@@ -24,6 +27,17 @@ def make_event_preview(events, color=False):
         event_preview = np.dstack([event_preview] * 3)
 
     return event_preview
+
+
+def gkern(kernlen=5, nsig=1.0):
+    """Returns a 2D Gaussian kernel array."""
+    """https://stackoverflow.com/a/29731818"""
+    interval = (2 * nsig + 1.) / (kernlen)
+    x = np.linspace(-nsig - interval / 2., nsig + interval / 2., kernlen + 1)
+    kern1d = np.diff(st.norm.cdf(x))
+    kernel_raw = np.sqrt(np.outer(kern1d, kern1d))
+    kernel = kernel_raw / kernel_raw.sum()
+    return torch.from_numpy(kernel).float()
 
 
 class EventPreprocessor:
@@ -68,8 +82,16 @@ class EventPreprocessor:
         # the mean and stddev of the nonzero values in the tensor are equal to (0.0, 1.0)
         if not self.no_normalize:
             with CudaTimer('Normalization'):
-                mean, stddev = events[events != 0].mean(), events[events != 0].std()
-                events[events != 0] = (events[events != 0] - mean) / stddev
+                nonzero_ev = (events != 0)
+                num_nonzeros = nonzero_ev.sum()
+                if num_nonzeros > 0:
+                    # compute mean and stddev of the **nonzero** elements of the event tensor
+                    # we do not use PyTorch's default mean() and std() functions since it's faster
+                    # to compute it by hand than applying those funcs to a masked array
+                    mean = events.sum() / num_nonzeros
+                    stddev = torch.sqrt((events ** 2).sum() / num_nonzeros - mean ** 2)
+                    mask = nonzero_ev.float()
+                    events = mask * (events - mean) / stddev
 
         return events
 
@@ -83,49 +105,36 @@ class IntensityRescaler:
 
     def __init__(self, options):
         self.auto_hdr = options.auto_hdr
-        if options.color:  # color reconstruction requires --auto_hdr to be enabled
-            self.auto_hdr = True
-
-        self.auto_hdr_min_percentile = options.auto_hdr_min_percentile
-        assert(self.auto_hdr_min_percentile >= 0 and self.auto_hdr_min_percentile < 30)
-        self.auto_hdr_max_percentile = options.auto_hdr_max_percentile
-        assert(self.auto_hdr_max_percentile >= 70 and self.auto_hdr_max_percentile <= 100)
-        self.auto_hdr_moving_average_size = options.auto_hdr_moving_average_size  # size of moving average window for auto hdr
-        assert(self.auto_hdr_moving_average_size > 0 and self.auto_hdr_moving_average_size <= 100)
-        self.auto_hdr_border = options.auto_hdr_border
-        assert(self.auto_hdr_border >= 0 and self.auto_hdr_border < 50)
-
         self.intensity_bounds = deque()
-
-        print('== Image rescaling ==')
-        if self.auto_hdr:
-            print('Will rescale image intensities to [0,1].')
-            print('Min / max percentile: {:.1f}, {:.1f}.'.format(self.auto_hdr_min_percentile,
-                                                                 self.auto_hdr_max_percentile))
-            print('Sliding window size: {}.'.format(self.auto_hdr_moving_average_size))
-            print('Ignoring outer border of width {} in computation of min / max.'.format(self.auto_hdr_border))
+        self.auto_hdr_median_filter_size = options.auto_hdr_median_filter_size
+        self.Imin = options.Imin
+        self.Imax = options.Imax
 
     def __call__(self, img):
         """
-        param img: NumPy array taking values in [0, 1]
+        param img: [1 x 1 x H x W] Tensor taking values in [0, 1]
         """
-
         if self.auto_hdr:
-            # adjust image dynamic range (i.e. its contrast)
-            if len(self.intensity_bounds) > self.auto_hdr_moving_average_size:
-                self.intensity_bounds.popleft()
+            with CudaTimer('Compute Imin/Imax (auto HDR)'):
+                Imin = torch.min(img).item()
+                Imax = torch.max(img).item()
 
-            border = self.auto_hdr_border
-            # Note: we ignore a few pixels on the outer image boundary when computing the robust min/max,
-            # since those pixels tend to contain lots of outlier values (boundary effects),
-            # leading to unstable min/max.
-            rmin = robust_min(img[border:-border, border:-border].ravel(), self.auto_hdr_min_percentile)
-            rmax = robust_max(img[border:-border, border:-border].ravel(), self.auto_hdr_max_percentile)
-            self.intensity_bounds.append((rmin, rmax))
-            mean_rmin = np.median([rmin for rmin, rmax in self.intensity_bounds])
-            mean_rmax = np.median([rmax for rmin, rmax in self.intensity_bounds])
-            img = (img.astype(np.float32) - mean_rmin) / (mean_rmax - mean_rmin)
-            img = np.clip(img, 0.0, 1.0)
+                # ensure that the range is at least 0.1
+                Imin = np.clip(Imin, 0.0, 0.45)
+                Imax = np.clip(Imax, 0.55, 1.0)
+
+                # adjust image dynamic range (i.e. its contrast)
+                if len(self.intensity_bounds) > self.auto_hdr_median_filter_size:
+                    self.intensity_bounds.popleft()
+
+                self.intensity_bounds.append((Imin, Imax))
+                self.Imin = np.median([rmin for rmin, rmax in self.intensity_bounds])
+                self.Imax = np.median([rmax for rmin, rmax in self.intensity_bounds])
+
+        with CudaTimer('Intensity rescaling'):
+            img = 255.0 * (img - self.Imin) / (self.Imax - self.Imin)
+            img.clamp_(0.0, 255.0)
+            img = img.byte()  # convert to 8-bit tensor
 
         return img
 
@@ -222,22 +231,25 @@ class ImageDisplay:
         cv2.waitKey(self.wait_time)
 
 
-def unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.0, threshold=0):
-    """Return a sharpened version of the image, using an unsharp mask.
-    Taken from: https://github.com/soroushj/python-opencv-numpy-example/blob/master/unsharpmask.py
+class UnsharpMaskFilter:
     """
-    # For details on unsharp masking, see:
-    # https://en.wikipedia.org/wiki/Unsharp_masking
-    # https://homepages.inf.ed.ac.uk/rbf/HIPR2/unsharp.htm
-    blurred = cv2.GaussianBlur(image, kernel_size, sigma)
-    sharpened = float(amount + 1) * image - float(amount) * blurred
-    sharpened = np.maximum(sharpened, np.zeros(sharpened.shape))
-    sharpened = np.minimum(sharpened, 255 * np.ones(sharpened.shape))
-    sharpened = sharpened.round().astype(np.uint8)
-    if threshold > 0:
-        low_contrast_mask = np.absolute(image - blurred) < threshold
-        np.copyto(sharpened, image, where=low_contrast_mask)
-    return sharpened
+    Utility class to perform unsharp mask filtering on reconstructed images.
+    """
+
+    def __init__(self, options, device):
+        self.unsharp_mask_amount = options.unsharp_mask_amount
+        self.unsharp_mask_sigma = options.unsharp_mask_sigma
+        self.gaussian_kernel_size = 5
+        self.gaussian_kernel = gkern(self.gaussian_kernel_size,
+                                     self.unsharp_mask_sigma).unsqueeze(0).unsqueeze(0).to(device)
+
+    def __call__(self, img):
+        if self.unsharp_mask_amount > 0:
+            with CudaTimer('Unsharp mask'):
+                blurred = F.conv2d(img, self.gaussian_kernel,
+                                   padding=self.gaussian_kernel_size // 2)
+                img = (1 + self.unsharp_mask_amount) * img - self.unsharp_mask_amount * blurred
+        return img
 
 
 class ImageFilter:
@@ -246,16 +258,9 @@ class ImageFilter:
     """
 
     def __init__(self, options):
-        self.unsharp_mask_amount = options.unsharp_mask_amount
-        self.unsharp_mask_sigma = options.unsharp_mask_sigma
         self.bilateral_filter_sigma = options.bilateral_filter_sigma
 
     def __call__(self, img):
-
-        if self.unsharp_mask_amount > 0:
-            with Timer('Unsharp mask (sigma={:.2f}, amount={:.1f})'.format(self.unsharp_mask_sigma, self.unsharp_mask_amount)):
-                filtered_img = unsharp_mask(img, sigma=self.unsharp_mask_sigma, amount=self.unsharp_mask_amount)
-                img = filtered_img
 
         if self.bilateral_filter_sigma:
             with Timer('Bilateral filter (sigma={:.2f})'.format(self.bilateral_filter_sigma)):
@@ -267,13 +272,12 @@ class ImageFilter:
         return img
 
 
-def optimal_crop_size(max_size, max_subsample_factor, safety_margin=0):
+def optimal_crop_size(max_size, max_subsample_factor):
     """ Find the optimal crop size for a given max_size and subsample_factor.
         The optimal crop size is the smallest integer which is greater or equal than max_size,
         while being divisible by 2^max_subsample_factor.
     """
     crop_size = int(pow(2, max_subsample_factor) * ceil(max_size / pow(2, max_subsample_factor)))
-    crop_size += safety_margin * pow(2, max_subsample_factor)
     return crop_size
 
 
@@ -284,19 +288,19 @@ class CropParameters:
         Post-processing: Crop the output image back to the original image size
     """
 
-    def __init__(self, width, height, num_encoders, safety_margin=0):
+    def __init__(self, width, height, num_encoders):
 
         self.height = height
         self.width = width
         self.num_encoders = num_encoders
-        self.width_crop_size = optimal_crop_size(self.width, num_encoders, safety_margin)
-        self.height_crop_size = optimal_crop_size(self.height, num_encoders, safety_margin)
+        self.width_crop_size = optimal_crop_size(self.width, num_encoders)
+        self.height_crop_size = optimal_crop_size(self.height, num_encoders)
 
         self.padding_top = ceil(0.5 * (self.height_crop_size - self.height))
         self.padding_bottom = floor(0.5 * (self.height_crop_size - self.height))
         self.padding_left = ceil(0.5 * (self.width_crop_size - self.width))
         self.padding_right = floor(0.5 * (self.width_crop_size - self.width))
-        self.pad = ZeroPad2d((self.padding_left, self.padding_right, self.padding_top, self.padding_bottom))
+        self.pad = ReflectionPad2d((self.padding_left, self.padding_right, self.padding_top, self.padding_bottom))
 
         self.cx = floor(self.width_crop_size / 2)
         self.cy = floor(self.height_crop_size / 2)
@@ -365,31 +369,37 @@ def merge_channels_into_color_image(channels):
     :return a color image at full resolution
     """
 
-    assert('R' in channels)
-    assert('G' in channels)
-    assert('W' in channels)
-    assert('B' in channels)
-    assert('grayscale' in channels)
+    with Timer('Merge color channels'):
 
-    # upsample each channel independently
-    for channel in ['R', 'G', 'W', 'B']:
-        channels[channel] = cv2.resize(channels[channel], dsize=None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        assert('R' in channels)
+        assert('G' in channels)
+        assert('W' in channels)
+        assert('B' in channels)
+        assert('grayscale' in channels)
 
-    # Shift the channels so that they all have the same origin
-    channels['B'] = shift_image(channels['B'], dx=1, dy=1)
-    channels['G'] = shift_image(channels['G'], dx=1, dy=0)
-    channels['W'] = shift_image(channels['W'], dx=0, dy=1)
+        # upsample each channel independently
+        for channel in ['R', 'G', 'W', 'B']:
+            channels[channel] = cv2.resize(channels[channel], dsize=None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
 
-    # reconstruct the color image at half the resolution using the reconstructed channels RGBW
-    reconstruction_bgr = np.dstack([channels['B'],
-                                    0.5 * (channels['G'] + channels['W']),
-                                    channels['R']])
+        # Shift the channels so that they all have the same origin
+        channels['B'] = shift_image(channels['B'], dx=1, dy=1)
+        channels['G'] = shift_image(channels['G'], dx=1, dy=0)
+        channels['W'] = shift_image(channels['W'], dx=0, dy=1)
 
-    reconstruction_bgr = (255.0 * reconstruction_bgr).astype(np.uint8)
-    reconstruction_grayscale = (255.0 * channels['grayscale']).astype(np.uint8)
+        # reconstruct the color image at half the resolution using the reconstructed channels RGBW
+        reconstruction_bgr = np.dstack([channels['B'],
+                                        cv2.addWeighted(src1=channels['G'], alpha=0.5,
+                                                        src2=channels['W'], beta=0.5,
+                                                        gamma=0.0, dtype=cv2.CV_8U),
+                                        channels['R']])
 
-    # combine the full res grayscale resolution with the low res to get a full res color image
-    return upsample_color_image(reconstruction_grayscale, reconstruction_bgr)
+        reconstruction_grayscale = channels['grayscale']
+
+        # combine the full res grayscale resolution with the low res to get a full res color image
+        upsampled_img = upsample_color_image(reconstruction_grayscale, reconstruction_bgr)
+        return upsampled_img
+
+    return upsampled_img
 
 
 def events_to_voxel_grid(events, num_bins, width, height):

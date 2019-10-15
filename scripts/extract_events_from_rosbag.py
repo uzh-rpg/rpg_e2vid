@@ -7,6 +7,7 @@ import os
 import zipfile
 import shutil
 import sys
+from os.path import basename
 
 
 # Function borrowed from: https://stackoverflow.com/a/3041990
@@ -64,6 +65,7 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_folder):
         os.makedirs(args.output_folder)
 
+    width, height = None, None
     event_sum = 0
     event_msg_sum = 0
     num_msgs_between_logs = 25
@@ -85,6 +87,13 @@ if __name__ == "__main__":
             # Extract events to text file
             for topic, msg, t in bag.read_messages():
                 if topic == args.event_topic:
+
+                    if width is None:
+                        width = msg.width
+                        height = msg.height
+                        print('Found sensor size: {} x {}'.format(width, height))
+                        events_file.write("{} {}\n".format(width, height))
+
                     if event_msg_sum % num_msgs_between_logs == 0 or event_msg_sum >= total_num_event_msgs - 1:
                         print('Event messages: {} / {}'.format(event_msg_sum + 1, total_num_event_msgs))
                     event_msg_sum += 1
@@ -96,7 +105,7 @@ if __name__ == "__main__":
                         events_file.write(("1" if e.polarity else "0") + "\n")
                         event_sum += 1
 
-        # statistics (remove missing groundtruth or IMU file if not available)
+        # statistics
         print('All events extracted!')
         print('Events:', event_sum)
 
@@ -105,13 +114,13 @@ if __name__ == "__main__":
         print('Compressing text file...')
         path_to_events_zipfile = os.path.join(args.output_folder, '{}.zip'.format(output_name))
         with zipfile.ZipFile(path_to_events_zipfile, 'w') as zip_file:
-            zip_file.write(path_to_events_file, compress_type=zipfile.ZIP_DEFLATED)
+            zip_file.write(path_to_events_file, basename(path_to_events_file), compress_type=zipfile.ZIP_DEFLATED)
         print('Finished!')
 
-    # Remove events.txt
-    if query_yes_no('Remove text file {}?'.format(path_to_events_file)):
-        if os.path.exists(path_to_events_file):
-            os.remove(path_to_events_file)
-            print('Removed {}.'.format(path_to_events_file))
+        # Remove events.txt
+        if query_yes_no('Remove text file {}?'.format(path_to_events_file)):
+            if os.path.exists(path_to_events_file):
+                os.remove(path_to_events_file)
+                print('Removed {}.'.format(path_to_events_file))
 
     print('Done extracting events!')

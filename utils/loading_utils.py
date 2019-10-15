@@ -3,10 +3,14 @@ from model.model import *
 
 
 def load_model(path_to_model):
-    print('Loading model...')
+    print('Loading model {}...'.format(path_to_model))
     raw_model = torch.load(path_to_model)
     arch = raw_model['arch']
-    model_type = raw_model['model']
+
+    try:
+        model_type = raw_model['model']
+    except KeyError:
+        model_type = raw_model['config']['model']
 
     # instantiate model
     model = eval(arch)(model_type)

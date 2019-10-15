@@ -54,14 +54,12 @@ conda install -c conda-forge opencv
 - Download the pretrained model:
 
 ```bash
-mkdir -p pretrained
-wget "https://seafile.ifi.uzh.ch/f/457050be5aef4ed59ef6/?dl=1" -O pretrained/E2VID.pth.tar
+wget "http://rpg.ifi.uzh.ch/data/E2VID/models/E2VID_lightweight.pth.tar" -O pretrained/E2VID_lightweight.pth.tar
 ```
 
 - Download an example file with event data:
 
 ```bash
-mkdir -p data
 wget "https://seafile.ifi.uzh.ch/f/ac6058453cc34ff5ab82/?dl=1" -O data/dynamic_6dof.zip
 ```
 
@@ -75,7 +73,7 @@ conda activate E2VID
 
 ```bash
 python run_reconstruction.py \
-  -c pretrained/E2VID.pth.tar \
+  -c pretrained/E2VID_lightweight.pth.tar \
   -i data/dynamic_6dof.zip \
   --auto_hdr \
   --display \
@@ -89,10 +87,10 @@ Below is a description of the most important parameters:
 #### Main parameters
 
 - ``--window_size`` / ``-N`` (default: None) Number of events per tensor. This is the parameter that has the most influence of the image reconstruction quality. If set to None, this number will be automatically computed based on the sensor size, as N = width * height * num_events_per_pixel (see description of that parameter below).
-- ``--auto_hdr`` (default: True) If True, the output image values (in the range [0,1]) will be rescaled using (robust) min/max normalization. See also the parameters ``--auto_hdr_min_percentile``, ``--auto_hdr_max_percentile``, and ``--auto_hdr_moving_average_size``.
-- ``--safety_margin`` (default: 5): zero-pad the input event tensors with zeros to avoid boundary effects (typical range: [0,5]). A small value reduces computation time but may introduce boundary effects.
+-- ``--Imin`` (default: 0.0), `--Imax` (default: 1.0): the output image is normalized as follows: I = (I - Imin) / (Imax - Imin). If `--auto_hdr` is set to True, `--Imin` and `--Imax` will be automatically computed.
+- ``--auto_hdr`` (default: False) Automatically compute `--Imin` and `--Imax`. Disabled when `--color` is set.
 - ``--hot_pixels_file`` (default: None): Path to a file specifying the locations of hot pixels (such a file can be obtained with [this tool](https://github.com/cedric-scheerlinck/dvs_tools/tree/master/dvs_hot_pixel_filter) for example). These pixels will be ignored (i.e. zeroed out in the event tensors).
-- ``--color`` (default: False): if True, will perform color reconstruction as described in the paper. Only use this with a [color event camera](http://rpg.ifi.uzh.ch/CED.html) such as the Color DAVIS346. When ``--color`` is set, the ``--auto_hdr`` flag will be automatically set. Do not forget to set ``width=346`` and ``height=260`` for the ColorDAVIS346.
+- ``--color`` (default: False): if True, will perform color reconstruction as described in the paper. Only use this with a [color event camera](http://rpg.ifi.uzh.ch/CED.html) such as the Color DAVIS346.
 
 #### Output parameters
 
@@ -114,10 +112,11 @@ Below is a description of the most important parameters:
 
 We provide a list of example (publicly available) event datasets to get started with E2VID.
 
-- [Event Camera Dataset](https://seafile.ifi.uzh.ch/d/31a928bb230e4f8dbef4/)
-- [Bardow et al., CVPR'16](https://seafile.ifi.uzh.ch/d/ac21d1dd21db443eb165/)
-- [Scherlinck et al., ACCV'18](https://seafile.ifi.uzh.ch/d/b59ad45811674ac5a49f/)
-- [Color event sequences from the CED dataset Scheerlinck et al., CVPR'18](https://seafile.ifi.uzh.ch/d/fe294093da7f46d2867c/)
+- [High Speed (gun shooting!) and HDR Dataset](http://rpg.ifi.uzh.ch/E2VID.html)
+- [Event Camera Dataset](http://rpg.ifi.uzh.ch/data/E2VID/datasets/ECD_IJRR17/)
+- [Bardow et al., CVPR'16](http://rpg.ifi.uzh.ch/data/E2VID/datasets/SOFIE_CVPR16/)
+- [Scherlinck et al., ACCV'18](http://rpg.ifi.uzh.ch/data/E2VID/datasets/HF_ACCV18/)
+- [Color event sequences from the CED dataset Scheerlinck et al., CVPR'18](http://rpg.ifi.uzh.ch/data/E2VID/datasets/CED_CVPRW19/)
 
 ## Working with ROS
 
@@ -142,7 +141,6 @@ python scripts/extract_events_from_rosbag.py /path/to/rosbag.bag \
 
 ```bash
 python scripts/image_folder_to_rosbag.py \
-  --rosbag_folder /path/to/rosbag/folder \
   --datasets dynamic_6dof \
   --image_folder /path/to/image/folder \
   --output_folder /path/to/output_folder \
@@ -157,7 +155,7 @@ python embed_reconstructed_images_in_rosbag.py \
   --rosbag_folder /path/to/rosbag/folder \
   --datasets dynamic_6dof \
   --image_folder /path/to/image/folder \
-  --output_folder /path/to/output_folder\
+  --output_folder /path/to/output_folder \
   --image_topic /dvs/image_reconstructed
 ```
 

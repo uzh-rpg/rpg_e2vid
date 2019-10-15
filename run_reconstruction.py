@@ -18,8 +18,6 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--path_to_model', required=True, type=str,
                         help='path to model weights')
     parser.add_argument('-i', '--input_file', required=True, type=str)
-    parser.add_argument('--width', default=240, type=int)
-    parser.add_argument('--height', default=180, type=int)
     parser.add_argument('-N', '--window_size', default=None, type=int)
     parser.add_argument('--num_events_per_pixel', default=0.35, type=float,
                         help='in case N (window size) is not specified, it will be \
@@ -33,28 +31,36 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Loading model
+    # Read sensor size from the first first line of the event file
+    path_to_events = args.input_file
+
+    header = pd.read_csv(path_to_events, delim_whitespace=True, header=None, names=['width', 'height'],
+                         dtype={'width': np.int, 'height': np.int},
+                         nrows=1)
+    width, height = header.values[0]
+    print('Sensor size: {} x {}'.format(width, height))
+
+    # Load model
     model = load_model(args.path_to_model)
     device = get_device(args.use_gpu)
 
     model = model.to(device)
     model.eval()
 
-    reconstructor = ImageReconstructor(model, args.height, args.width, model.num_bins, args)
+    reconstructor = ImageReconstructor(model, height, width, model.num_bins, args)
 
     """ Read chunks of events using Pandas """
-    path_to_events = args.input_file
 
-    # loop through the events and reconstruct images
+    # Loop through the events and reconstruct images
     N = args.window_size
 
     if N is None:
-        N = int(args.width * args.height * args.num_events_per_pixel)
+        N = int(width * height * args.num_events_per_pixel)
         print('Will use {} events per tensor (automatically estimated with num_events_per_pixel={:0.2f}).'.format(
             N, args.num_events_per_pixel))
     else:
         print('Will use {} events per tensor (user-specified)'.format(N))
-        mean_num_events_per_pixel = float(N) / float(args.width * args.height)
+        mean_num_events_per_pixel = float(N) / float(width * height)
         if mean_num_events_per_pixel < 0.1:
             print('!!Warning!! the number of events used ({}) seems to be low compared to the sensor size. \
                    The reconstruction results might be suboptimal.'.format(N))
@@ -72,7 +78,7 @@ if __name__ == "__main__":
     event_tensor_iterator = pd.read_csv(path_to_events, delim_whitespace=True, header=None, names=['t', 'x', 'y', 'pol'],
                                         dtype={'t': np.float64, 'x': np.int16, 'y': np.int16, 'pol': np.int16},
                                         engine='c',
-                                        skiprows=start_index, chunksize=N, nrows=None)
+                                        skiprows=start_index + 1, chunksize=N, nrows=None)
 
     with Timer('Processing entire dataset'):
         for event_tensor_pd in event_tensor_iterator:
@@ -83,14 +89,14 @@ if __name__ == "__main__":
                 if args.compute_voxel_grid_on_cpu:
                     event_tensor = events_to_voxel_grid(event_tensor_pd.values,
                                                         num_bins=model.num_bins,
-                                                        width=args.width,
-                                                        height=args.height)
+                                                        width=width,
+                                                        height=height)
                     event_tensor = torch.from_numpy(event_tensor)
                 else:
                     event_tensor = events_to_voxel_grid_pytorch(event_tensor_pd.values,
                                                                 num_bins=model.num_bins,
-                                                                width=args.width,
-                                                                height=args.height,
+                                                                width=width,
+                                                                height=height,
                                                                 device=device)
 
             reconstructor.update_reconstruction(event_tensor, start_index + N, last_timestamp)
