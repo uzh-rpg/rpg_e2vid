@@ -15,16 +15,29 @@ import torch.nn.functional as F
 from math import sqrt
 
 
-def make_event_preview(events, color=False):
-    event_preview = events[0, :, :, :].detach().cpu().numpy()
-    event_preview = np.sum(event_preview, axis=0)
+def make_event_preview(events, mode='red-blue', num_bins_to_show=-1):
+    # events: [1 x C x H x W] event tensor
+    # mode: 'red-blue' or 'grayscale'
+    # num_bins_to_show: number of bins of the voxel grid to show. -1 means show all bins.
+    assert(mode in ['red-blue', 'grayscale'])
+    if num_bins_to_show < 0:
+        sum_events = torch.sum(events[0, :, :, :], dim=0).detach().cpu().numpy()
+    else:
+        sum_events = torch.sum(events[0, -num_bins_to_show:, :, :], dim=0).detach().cpu().numpy()
 
-    # normalize event image to [0, 255] for display
-    m, M = -10.0, 10.0
-    event_preview = np.clip((255.0 * (event_preview - m) / (M - m)).astype(np.uint8), 0, 255)
-
-    if color:
-        event_preview = np.dstack([event_preview] * 3)
+    if mode == 'red-blue':
+        # Red-blue mode
+        # positive events: blue, negative events: red
+        event_preview = np.zeros((sum_events.shape[0], sum_events.shape[1], 3), dtype=np.uint8)
+        b = event_preview[:, :, 0]
+        r = event_preview[:, :, 2]
+        b[sum_events > 0] = 255
+        r[sum_events < 0] = 255
+    else:
+        # Grayscale mode
+        # normalize event image to [0, 255] for display
+        m, M = -10.0, 10.0
+        event_preview = np.clip((255.0 * (sum_events - m) / (M - m)).astype(np.uint8), 0, 255)
 
     return event_preview
 
@@ -149,8 +162,9 @@ class ImageWriter:
 
         self.output_folder = options.output_folder
         self.dataset_name = options.dataset_name
-        self.color = options.color
         self.save_events = options.show_events
+        self.event_display_mode = options.event_display_mode
+        self.num_bins_to_show = options.num_bins_to_show
         print('== Image Writer ==')
         if self.output_folder:
             ensure_dir(self.output_folder)
@@ -172,7 +186,8 @@ class ImageWriter:
             return
 
         if self.save_events and events is not None:
-            event_preview = make_event_preview(events, color=self.color)
+            event_preview = make_event_preview(events, mode=self.event_display_mode,
+                                               num_bins_to_show=self.num_bins_to_show)
             cv2.imwrite(join(self.event_previews_folder,
                              'events_{:010d}.png'.format(event_tensor_id)), event_preview)
 
@@ -195,6 +210,8 @@ class ImageDisplay:
         self.display = options.display
         self.show_events = options.show_events
         self.color = options.color
+        self.event_display_mode = options.event_display_mode
+        self.num_bins_to_show = options.num_bins_to_show
 
         self.window_name = 'Reconstruction'
         if self.show_events:
@@ -221,10 +238,19 @@ class ImageDisplay:
 
         if self.show_events:
             assert(events is not None)
-            event_preview = make_event_preview(events, color=self.color)
+            event_preview = make_event_preview(events, mode=self.event_display_mode,
+                                               num_bins_to_show=self.num_bins_to_show)
             event_preview = self.crop_outer_border(event_preview, self.border)
 
         if self.show_events:
+            img_is_color = (len(img.shape) == 3)
+            preview_is_color = (len(event_preview.shape) == 3)
+
+            if(preview_is_color and not img_is_color):
+                img = np.dstack([img] * 3)
+            elif(img_is_color and not preview_is_color):
+                event_preview = np.dstack([event_preview] * 3)
+
             img = np.hstack([event_preview, img])
 
         cv2.imshow(self.window_name, img)

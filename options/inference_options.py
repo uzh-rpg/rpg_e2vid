@@ -13,6 +13,12 @@ def set_inference_options(parser):
     parser.add_argument('--show_events', dest='show_events', action='store_true')
     parser.set_defaults(show_events=False)
 
+    parser.add_argument('--event_display_mode', default='red-blue', type=str,
+                        help="Event display mode ('red-blue' or 'grayscale')")
+
+    parser.add_argument('--num_bins_to_show', default=-1, type=int,
+                        help="Number of bins of the voxel grid to show when displaying events (-1 means show all the bins).")
+
     parser.add_argument('--display_border_crop', default=0, type=int,
                         help="Remove the outer border of size display_border_crop before displaying image.")
 
