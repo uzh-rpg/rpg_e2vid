@@ -1,15 +1,15 @@
 import torch
 from utils.loading_utils import load_model, get_device
-from os.path import join, basename
 import numpy as np
-import json
 import argparse
+import pandas as pd
+from utils.event_readers import FixedSizeEventReader, FixedDurationEventReader
 from utils.inference_utils import events_to_voxel_grid, events_to_voxel_grid_pytorch
 from utils.timers import Timer
 import time
-import pandas as pd
 from image_reconstructor import ImageReconstructor
 from options.inference_options import set_inference_options
+
 
 if __name__ == "__main__":
 
@@ -18,7 +18,12 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--path_to_model', required=True, type=str,
                         help='path to model weights')
     parser.add_argument('-i', '--input_file', required=True, type=str)
-    parser.add_argument('-N', '--window_size', default=None, type=int)
+    parser.add_argument('--fixed_duration', dest='fixed_duration', action='store_true')
+    parser.set_defaults(fixed_duration=False)
+    parser.add_argument('-N', '--window_size', default=None, type=int,
+                        help="Size of each event window, in number of events. Ignored if --fixed_duration=True")
+    parser.add_argument('-T', '--window_duration', default=33.33, type=float,
+                        help="Duration of each event window, in milliseconds. Ignored if --fixed_duration=False")
     parser.add_argument('--num_events_per_pixel', default=0.35, type=float,
                         help='in case N (window size) is not specified, it will be \
                               automatically computed as N = width * height * num_events_per_pixel')
@@ -53,20 +58,20 @@ if __name__ == "__main__":
 
     # Loop through the events and reconstruct images
     N = args.window_size
-
-    if N is None:
-        N = int(width * height * args.num_events_per_pixel)
-        print('Will use {} events per tensor (automatically estimated with num_events_per_pixel={:0.2f}).'.format(
-            N, args.num_events_per_pixel))
-    else:
-        print('Will use {} events per tensor (user-specified)'.format(N))
-        mean_num_events_per_pixel = float(N) / float(width * height)
-        if mean_num_events_per_pixel < 0.1:
-            print('!!Warning!! the number of events used ({}) seems to be low compared to the sensor size. \
-                   The reconstruction results might be suboptimal.'.format(N))
-        elif mean_num_events_per_pixel > 1.5:
-            print('!!Warning!! the number of events used ({}) seems to be high compared to the sensor size. \
-                   The reconstruction results might be suboptimal.'.format(N))
+    if not args.fixed_duration:
+        if N is None:
+            N = int(width * height * args.num_events_per_pixel)
+            print('Will use {} events per tensor (automatically estimated with num_events_per_pixel={:0.2f}).'.format(
+                N, args.num_events_per_pixel))
+        else:
+            print('Will use {} events per tensor (user-specified)'.format(N))
+            mean_num_events_per_pixel = float(N) / float(width * height)
+            if mean_num_events_per_pixel < 0.1:
+                print('!!Warning!! the number of events used ({}) seems to be low compared to the sensor size. \
+                    The reconstruction results might be suboptimal.'.format(N))
+            elif mean_num_events_per_pixel > 1.5:
+                print('!!Warning!! the number of events used ({}) seems to be high compared to the sensor size. \
+                    The reconstruction results might be suboptimal.'.format(N))
 
     initial_offset = args.skipevents
     sub_offset = args.suboffset
@@ -75,30 +80,33 @@ if __name__ == "__main__":
     if args.compute_voxel_grid_on_cpu:
         print('Will compute voxel grid on CPU.')
 
-    event_tensor_iterator = pd.read_csv(path_to_events, delim_whitespace=True, header=None, names=['t', 'x', 'y', 'pol'],
-                                        dtype={'t': np.float64, 'x': np.int16, 'y': np.int16, 'pol': np.int16},
-                                        engine='c',
-                                        skiprows=start_index + 1, chunksize=N, nrows=None)
+    if args.fixed_duration:
+        event_window_iterator = FixedDurationEventReader(path_to_events,
+                                                         duration_ms=args.window_duration,
+                                                         start_index=start_index)
+    else:
+        event_window_iterator = FixedSizeEventReader(path_to_events, num_events=N, start_index=start_index)
 
     with Timer('Processing entire dataset'):
-        for event_tensor_pd in event_tensor_iterator:
+        for event_window in event_window_iterator:
 
-            last_timestamp = event_tensor_pd.values[-1, 0]
+            last_timestamp = event_window[-1, 0]
 
             with Timer('Building event tensor'):
                 if args.compute_voxel_grid_on_cpu:
-                    event_tensor = events_to_voxel_grid(event_tensor_pd.values,
+                    event_tensor = events_to_voxel_grid(event_window,
                                                         num_bins=model.num_bins,
                                                         width=width,
                                                         height=height)
                     event_tensor = torch.from_numpy(event_tensor)
                 else:
-                    event_tensor = events_to_voxel_grid_pytorch(event_tensor_pd.values,
+                    event_tensor = events_to_voxel_grid_pytorch(event_window,
                                                                 num_bins=model.num_bins,
                                                                 width=width,
                                                                 height=height,
                                                                 device=device)
 
-            reconstructor.update_reconstruction(event_tensor, start_index + N, last_timestamp)
+            num_events_in_window = event_window.shape[0]
+            reconstructor.update_reconstruction(event_tensor, start_index + num_events_in_window, last_timestamp)
 
-            start_index += N
+            start_index += num_events_in_window
