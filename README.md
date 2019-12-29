@@ -4,15 +4,15 @@
 
 This is the code for the paper **High Speed and High Dynamic Range Video with an Event Camera** by [Henri Rebecq](http://henri.rebecq.fr), Rene Ranftl, [Vladlen Koltun](http://vladlen.info/) and [Davide Scaramuzza](http://rpg.ifi.uzh.ch/people_scaramuzza.html):
 
-You can find a pdf of the paper [here](http://rpg.ifi.uzh.ch/docs/arXiv19_Rebecq.pdf).
+You can find a pdf of the paper [here](http://rpg.ifi.uzh.ch/docs/TPAMI19_Rebecq.pdf).
 If you use any of this code, please cite the following publications:
 
 ```bibtex
-@Article{Rebecq19arxiv,
+@Article{Rebecq19pami,
   author        = {Henri Rebecq and Ren{\'{e}} Ranftl and Vladlen Koltun and Davide Scaramuzza},
   title         = {High Speed and High Dynamic Range Video with an Event Camera},
-  journal       = {ar{X}iv e-prints},
-  url           = {https://arxiv.org/abs/1906.07165}
+  journal       = {{IEEE} Trans. Pattern Anal. Mach. Intell. (T-PAMI)},
+  url           = {http://rpg.ifi.uzh.ch/docs/TPAMI19_Rebecq.pdf},
   year          = 2019
 }
 ```
