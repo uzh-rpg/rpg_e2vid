@@ -273,3 +273,29 @@ class ConvGRU(nn.Module):
         new_state = prev_state * (1 - update) + out_inputs * update
 
         return new_state
+
+
+class RecurrentResidualLayer(nn.Module):
+    def __init__(self, in_channels, out_channels,
+                 recurrent_block_type='convlstm', norm=None, BN_momentum=0.1):
+        super(RecurrentResidualLayer, self).__init__()
+
+        assert(recurrent_block_type in ['convlstm', 'convgru'])
+        self.recurrent_block_type = recurrent_block_type
+        if self.recurrent_block_type == 'convlstm':
+            RecurrentBlock = ConvLSTM
+        else:
+            RecurrentBlock = ConvGRU
+        self.conv = ResidualBlock(in_channels=in_channels,
+                                  out_channels=out_channels,
+                                  norm=norm,
+                                  BN_momentum=BN_momentum)
+        self.recurrent_block = RecurrentBlock(input_size=out_channels,
+                                              hidden_size=out_channels,
+                                              kernel_size=3)
+
+    def forward(self, x, prev_state):
+        x = self.conv(x)
+        state = self.recurrent_block(x, prev_state)
+        x = state[0] if self.recurrent_block_type == 'convlstm' else state
+        return x, state

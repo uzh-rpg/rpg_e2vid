@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as f
 from torch.nn import init
-from .submodules import ConvLayer, UpsampleConvLayer, TransposedConvLayer, RecurrentConvLayer, ResidualBlock, ConvLSTM, ConvGRU
+from .submodules import ConvLayer, UpsampleConvLayer, TransposedConvLayer, RecurrentConvLayer, ResidualBlock, ConvLSTM, ConvGRU, RecurrentResidualLayer
 
 
 def skip_concat(x1, x2):
@@ -175,4 +175,83 @@ class UNetRecurrent(BaseUNet):
         # tail
         img = self.activation(self.pred(self.apply_skip_connection(x, head)))
 
+        return img, states
+
+
+class UNetFire(BaseUNet):
+    """
+    """
+
+    def __init__(self, num_input_channels, num_output_channels=1, skip_type='sum',
+                 recurrent_block_type='convgru', base_num_channels=16,
+                 num_residual_blocks=2, norm=None, kernel_size=3,
+                 recurrent_blocks={'resblock': [0]}, BN_momentum=0.1):
+        super(UNetFire, self).__init__(num_input_channels=num_input_channels,
+                                       num_output_channels=num_output_channels,
+                                       skip_type=skip_type,
+                                       base_num_channels=base_num_channels,
+                                       num_residual_blocks=num_residual_blocks,
+                                       norm=norm,
+                                       kernel_size=kernel_size)
+        self.recurrent_blocks = recurrent_blocks
+        self.head = RecurrentConvLayer(self.num_input_channels,
+                                       self.base_num_channels,
+                                       kernel_size=self.kernel_size,
+                                       padding=self.kernel_size // 2,
+                                       recurrent_block_type=recurrent_block_type,
+                                       norm=self.norm,
+                                       BN_momentum=BN_momentum)
+        self.num_recurrent_units = 1
+        self.resblocks = nn.ModuleList()
+        recurrent_indices = self.recurrent_blocks.get('resblock', [])
+        for i in range(self.num_residual_blocks):
+            if i in recurrent_indices or -1 in recurrent_indices:
+                self.resblocks.append(RecurrentResidualLayer(
+                    in_channels=self.base_num_channels,
+                    out_channels=self.base_num_channels,
+                    recurrent_block_type=recurrent_block_type,
+                    norm=self.norm,
+                    BN_momentum=BN_momentum))
+                self.num_recurrent_units += 1
+            else:
+                self.resblocks.append(ResidualBlock(self.base_num_channels,
+                                                    self.base_num_channels,
+                                                    norm=self.norm,
+                                                    BN_momentum=BN_momentum))
+
+        self.pred = ConvLayer(2 * self.base_num_channels if self.skip_type == 'concat' else self.base_num_channels,
+                              self.num_output_channels, kernel_size=1, padding=0, activation=None, norm=None)
+
+    def forward(self, x, prev_states):
+        """
+        :param x: N x num_input_channels x H x W
+        :param prev_states: previous LSTM states for every encoder layer
+        :return: N x num_output_channels x H x W
+        """
+
+        if prev_states is None:
+            prev_states = [None] * (self.num_recurrent_units)
+
+        states = []
+        state_idx = 0
+
+        # head
+        x, state = self.head(x, prev_states[state_idx])
+        state_idx += 1
+        states.append(state)
+
+        head_feature_map = x
+
+        # residual blocks
+        recurrent_indices = self.recurrent_blocks.get('resblock', [])
+        for i, resblock in enumerate(self.resblocks):
+            if i in recurrent_indices or -1 in recurrent_indices:
+                x, state = resblock(x, prev_states[state_idx])
+                state_idx += 1
+                states.append(state)
+            else:
+                x = resblock(x)
+
+        # tail
+        img = self.pred(self.apply_skip_connection(x, head_feature_map))
         return img, states
