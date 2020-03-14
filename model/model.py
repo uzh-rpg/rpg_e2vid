@@ -109,8 +109,8 @@ class FireNet(BaseE2VID):
     def __init__(self, config):
         super().__init__(config)
         self.recurrent_block_type = str(config.get('recurrent_block_type', 'convgru'))
+        kernel_size = config.get('kernel_size', 3)
         recurrent_blocks = config.get('recurrent_blocks', {'resblock': [0]})
-        BN_momentum = config.get('BN_momentum', 0.1)
         self.net = UNetFire(self.num_bins,
                             num_output_channels=1,
                             skip_type=self.skip_type,
@@ -118,9 +118,8 @@ class FireNet(BaseE2VID):
                             base_num_channels=self.base_num_channels,
                             num_residual_blocks=self.num_residual_blocks,
                             norm=self.norm,
-                            kernel_size=self.kernel_size,
-                            recurrent_blocks=recurrent_blocks,
-                            BN_momentum=BN_momentum)
+                            kernel_size=kernel_size,
+                            recurrent_blocks=recurrent_blocks)
 
     def forward(self, event_tensor, prev_states):
         img, states = self.net.forward(event_tensor, prev_states)

@@ -185,22 +185,21 @@ class UNetFire(BaseUNet):
     def __init__(self, num_input_channels, num_output_channels=1, skip_type='sum',
                  recurrent_block_type='convgru', base_num_channels=16,
                  num_residual_blocks=2, norm=None, kernel_size=3,
-                 recurrent_blocks={'resblock': [0]}, BN_momentum=0.1):
+                 recurrent_blocks={'resblock': [0]}):
         super(UNetFire, self).__init__(num_input_channels=num_input_channels,
                                        num_output_channels=num_output_channels,
                                        skip_type=skip_type,
                                        base_num_channels=base_num_channels,
                                        num_residual_blocks=num_residual_blocks,
-                                       norm=norm,
-                                       kernel_size=kernel_size)
+                                       norm=norm)
+        self.kernel_size = kernel_size
         self.recurrent_blocks = recurrent_blocks
         self.head = RecurrentConvLayer(self.num_input_channels,
                                        self.base_num_channels,
                                        kernel_size=self.kernel_size,
                                        padding=self.kernel_size // 2,
                                        recurrent_block_type=recurrent_block_type,
-                                       norm=self.norm,
-                                       BN_momentum=BN_momentum)
+                                       norm=self.norm)
         self.num_recurrent_units = 1
         self.resblocks = nn.ModuleList()
         recurrent_indices = self.recurrent_blocks.get('resblock', [])
@@ -210,14 +209,12 @@ class UNetFire(BaseUNet):
                     in_channels=self.base_num_channels,
                     out_channels=self.base_num_channels,
                     recurrent_block_type=recurrent_block_type,
-                    norm=self.norm,
-                    BN_momentum=BN_momentum))
+                    norm=self.norm))
                 self.num_recurrent_units += 1
             else:
                 self.resblocks.append(ResidualBlock(self.base_num_channels,
                                                     self.base_num_channels,
-                                                    norm=self.norm,
-                                                    BN_momentum=BN_momentum))
+                                                    norm=self.norm))
 
         self.pred = ConvLayer(2 * self.base_num_channels if self.skip_type == 'concat' else self.base_num_channels,
                               self.num_output_channels, kernel_size=1, padding=0, activation=None, norm=None)
@@ -240,8 +237,6 @@ class UNetFire(BaseUNet):
         state_idx += 1
         states.append(state)
 
-        head_feature_map = x
-
         # residual blocks
         recurrent_indices = self.recurrent_blocks.get('resblock', [])
         for i, resblock in enumerate(self.resblocks):
@@ -253,5 +248,5 @@ class UNetFire(BaseUNet):
                 x = resblock(x)
 
         # tail
-        img = self.pred(self.apply_skip_connection(x, head_feature_map))
+        img = self.pred(x)
         return img, states

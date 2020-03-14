@@ -277,7 +277,7 @@ class ConvGRU(nn.Module):
 
 class RecurrentResidualLayer(nn.Module):
     def __init__(self, in_channels, out_channels,
-                 recurrent_block_type='convlstm', norm=None, BN_momentum=0.1):
+                 recurrent_block_type='convlstm', norm=None):
         super(RecurrentResidualLayer, self).__init__()
 
         assert(recurrent_block_type in ['convlstm', 'convgru'])
@@ -288,8 +288,7 @@ class RecurrentResidualLayer(nn.Module):
             RecurrentBlock = ConvGRU
         self.conv = ResidualBlock(in_channels=in_channels,
                                   out_channels=out_channels,
-                                  norm=norm,
-                                  BN_momentum=BN_momentum)
+                                  norm=norm)
         self.recurrent_block = RecurrentBlock(input_size=out_channels,
                                               hidden_size=out_channels,
                                               kernel_size=3)
