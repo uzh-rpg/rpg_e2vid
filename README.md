@@ -1,11 +1,22 @@
-# High Speed and High Dynamic Range Video with an Event Camera
+# Fast Image Reconstruction with an Event Camera (forked from High Speed and High Dynamic Range Video with an Event Camera)
 
 [![High Speed and High Dynamic Range Video with an Event Camera](http://rpg.ifi.uzh.ch/E2VID/video_thumbnail.png)](https://youtu.be/eomALySSGVU)
 
-This is the code for the paper **High Speed and High Dynamic Range Video with an Event Camera** by [Henri Rebecq](http://henri.rebecq.fr), Rene Ranftl, [Vladlen Koltun](http://vladlen.info/) and [Davide Scaramuzza](http://rpg.ifi.uzh.ch/people_scaramuzza.html):
+This code for the paper [**Fast Image Reconstruction with an Event Camera**](https://www.cedricscheerlinck.com/firenet) is based off code for the paper **High Speed and High Dynamic Range Video with an Event Camera** by [Henri Rebecq](http://henri.rebecq.fr), Rene Ranftl, [Vladlen Koltun](http://vladlen.info/) and [Davide Scaramuzza](http://rpg.ifi.uzh.ch/people_scaramuzza.html):
 
 You can find a pdf of the paper [here](http://rpg.ifi.uzh.ch/docs/TPAMI19_Rebecq.pdf).
 If you use any of this code, please cite the following publications:
+
+```bibtex
+@InProceedings{Scheerlinck20wacv,
+  author        = {Cedric Scheerlinck and Henri Rebecq and Daniel Gehrig and Nick Barnes and Robert Mahony and Davide Scaramuzza},
+  title         = {Fast Image Reconstruction with an Event Camera},
+  booktitle     = {{IEEE} Winter Conf. Appl. Comput. Vis. {(WACV)}},
+  year          = {2020},
+  pages         = {156--163}
+}
+```
+
 
 ```bibtex
 @Article{Rebecq19pami,
@@ -51,7 +62,11 @@ conda install -c conda-forge opencv
 
 ## Run
 
-- Download the pretrained model:
+- Download the pretrained [FireNet model](https://drive.google.com/file/d/1nBCeIF_Us-rGhCjdU5q1Ch-yrFckjZPa/view?usp=sharing)
+
+or
+
+- Download the pretrained E2VID model:
 
 ```bash
 wget "http://rpg.ifi.uzh.ch/data/E2VID/models/E2VID_lightweight.pth.tar" -O pretrained/E2VID_lightweight.pth.tar
@@ -73,7 +88,7 @@ conda activate E2VID
 
 ```bash
 python run_reconstruction.py \
-  -c pretrained/E2VID_lightweight.pth.tar \
+  -c firenet_1000.pth.tar \
   -i data/dynamic_6dof.zip \
   --auto_hdr \
   --display \
