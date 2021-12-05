@@ -46,8 +46,8 @@ if __name__ == "__main__":
     print('Sensor size: {} x {}'.format(width, height))
 
     # Load model
-    model = load_model(args.path_to_model)
     device = get_device(args.use_gpu)
+    model = load_model(args.path_to_model, device)
 
     model = model.to(device)
     model.eval()
